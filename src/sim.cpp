@@ -36,7 +36,6 @@ void Sim::registerTypes(ECSRegistry &registry)
 
 static void resetWorld(Engine &ctx)
 {
-    printf("Start world reset\n");
     EpisodeManager &episode_mgr = *ctx.data().episodeMgr;
     uint32_t episode_idx = 
         episode_mgr.episodeOffset.fetch_add(1, std::memory_order_relaxed);
@@ -68,7 +67,7 @@ static void resetWorld(Engine &ctx)
     goal_data.goalPosition = episode.goalPos;
     goal_data.goalEntity = dyn_entities[episode.targetIdx];
 
-    printf("End world reset\n");
+    ctx.getSingleton<broadphase::BVH>().rebuild();
 }
 
 inline void resetSystem(Engine &ctx, WorldReset &reset)
@@ -190,6 +189,9 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
         ctx.getUnsafe<broadphase::LeafID>(dynObjects[i]) =
             bp_bvh.reserveLeaf();
     }
+
+    resetWorld(ctx);
+    ctx.getSingleton<WorldReset>().resetNow = false;
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, WorldInit);
