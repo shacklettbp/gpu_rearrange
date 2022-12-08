@@ -1,12 +1,14 @@
 #include "sim.hpp"
 
+#include <madrona/mw_gpu_entry.hpp>
+
 using namespace madrona;
 using namespace madrona::phys;
 using namespace madrona::math;
 
 namespace GPURearrange {
 
-static constexpr inline CountT max_instances = 100;
+static constexpr inline CountT max_instances = 45;
 
 
 void Sim::registerTypes(ECSRegistry &registry)
@@ -34,6 +36,7 @@ void Sim::registerTypes(ECSRegistry &registry)
 
 static void resetWorld(Engine &ctx)
 {
+    printf("Start world reset\n");
     EpisodeManager &episode_mgr = *ctx.data().episodeMgr;
     uint32_t episode_idx = 
         episode_mgr.episodeOffset.fetch_add(1, std::memory_order_relaxed);
@@ -64,6 +67,8 @@ static void resetWorld(Engine &ctx)
         episode.instanceOffset + episode.targetIdx].pos;
     goal_data.goalPosition = episode.goalPos;
     goal_data.goalEntity = dyn_entities[episode.targetIdx];
+
+    printf("End world reset\n");
 }
 
 static inline void resetSystem(Engine &ctx, WorldReset &reset)
@@ -166,7 +171,7 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     : WorldBase(ctx),
       episodeMgr(init.episodeMgr)
 {
-    RigidBodyPhysicsSystem::init(ctx, 100, 100 * 50);
+    RigidBodyPhysicsSystem::init(ctx, 45, 100 * 50);
 
     render::RenderingSystem::init(ctx);
 
@@ -178,13 +183,15 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     ctx.getUnsafe<broadphase::LeafID>(agent) =
         bp_bvh.reserveLeaf();
 
-    dynObjects = (Entity *)malloc(sizeof(Entity) * max_instances);
+    dynObjects = (Entity *)malloc(sizeof(Entity) * (max_instances - 1));
 
-    for (CountT i = 0; i < max_instances; i++) {
+    for (CountT i = 0; i < max_instances - 1; i++) {
         dynObjects[i] = ctx.makeEntityNow<DynamicObject>();
         ctx.getUnsafe<broadphase::LeafID>(dynObjects[i]) =
             bp_bvh.reserveLeaf();
     }
 }
+
+MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, WorldInit);
 
 }

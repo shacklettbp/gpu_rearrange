@@ -5,6 +5,9 @@
 #include <madrona/utils.hpp>
 
 #include "sim.hpp"
+#include "data.hpp"
+
+#include <iostream>
 
 using namespace madrona;
 using namespace madrona::py;
@@ -20,27 +23,36 @@ struct Manager::Impl {
     EpisodeData episodes;
     TrainingExecutor mwGPU;
 
-    static inline Impl * init(const Config &cfg,
-                              Span<Episode> episodes);
+    static inline Impl * init(const Config &cfg);
 };
 
-static EpisodeData setupEpisodes(Span<Episode> cpu_episodes)
+static EpisodeData setupEpisodes(Span<const Episode> cpu_episodes,
+                                 Span<const InstanceInit> cpu_instances)
 {
     uint64_t total_bytes = sizeof(EpisodeManager);
-    uint64_t episodes_offset 
-        = utils::roundUp(total_bytes, alignof(Episode));
+    uint64_t inits_offset =
+        utils::roundUp(total_bytes, alignof(InstanceInit));
+    total_bytes = inits_offset + sizeof(InstanceInit) * cpu_instances.size();
+    uint64_t episodes_offset =
+        utils::roundUp(total_bytes, alignof(Episode));
     total_bytes = episodes_offset + sizeof(Episode) * cpu_episodes.size();
 
     void *gpu_data = cu::allocGPU(total_bytes);
+    void *instances_gpu_data = (char *)gpu_data + inits_offset;
     void *episode_gpu_data = (char *)gpu_data + episodes_offset;
 
     EpisodeManager mgr_tmp {
+        (InstanceInit *)instances_gpu_data,
         (Episode *)episode_gpu_data,
         uint32_t(cpu_episodes.size()),
         0,
     };
 
     cudaMemcpy(gpu_data, &mgr_tmp, sizeof(EpisodeManager),
+               cudaMemcpyHostToDevice);
+
+    cudaMemcpy(instances_gpu_data, cpu_instances.data(),
+               sizeof(InstanceInit) * cpu_instances.size(),
                cudaMemcpyHostToDevice);
 
     cudaMemcpy(episode_gpu_data, cpu_episodes.data(),
@@ -52,10 +64,13 @@ static EpisodeData setupEpisodes(Span<Episode> cpu_episodes)
     };
 }
 
-Manager::Impl * Manager::Impl::init(const Config &cfg,
-                                    Span<Episode> episodes)
+Manager::Impl * Manager::Impl::init(const Config &cfg)
 {
-    EpisodeData gpu_episode_data = setupEpisodes(episodes);
+    TrainingData training_data =
+        TrainingData::load(cfg.episodeFile, cfg.dataDir);
+
+    EpisodeData gpu_episode_data = setupEpisodes(training_data.episodes,
+                                                 training_data.instances);
 
     HeapArray<WorldInit> world_inits(cfg.numWorlds);
 
@@ -83,6 +98,8 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         CompileConfig::Executor::TaskGraph,
     });
 
+    mwgpu_exec.loadObjects(training_data.objects);
+
     return new Impl {
         cfg,
         gpu_episode_data,
@@ -90,18 +107,18 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
     };
 }
 
-Manager::Manager(const Config &cfg)
-    : impl_(Impl::init(cfg, {}))
+MADRONA_EXPORT Manager::Manager(const Config &cfg)
+    : impl_(Impl::init(cfg))
 {}
 
-Manager::~Manager() {}
+MADRONA_EXPORT Manager::~Manager() {}
 
-void Manager::step()
+MADRONA_EXPORT void Manager::step()
 {
     impl_->mwGPU.run();
 }
 
-GPUTensor Manager::resetTensor() const
+MADRONA_EXPORT GPUTensor Manager::resetTensor() const
 {
     void *dev_ptr = impl_->mwGPU.getExported(0);
 
@@ -109,7 +126,7 @@ GPUTensor Manager::resetTensor() const
                      {impl_->cfg.numWorlds, 1}, impl_->cfg.gpuID);
 }
 
-GPUTensor Manager::moveActionTensor() const
+MADRONA_EXPORT GPUTensor Manager::moveActionTensor() const
 {
     void *dev_ptr = impl_->mwGPU.getExported(1);
 
@@ -117,7 +134,7 @@ GPUTensor Manager::moveActionTensor() const
                      {impl_->cfg.numWorlds, 1}, impl_->cfg.gpuID);
 }
 
-GPUTensor Manager::gpsCompassTensor() const
+MADRONA_EXPORT GPUTensor Manager::gpsCompassTensor() const
 {
     void *dev_ptr = impl_->mwGPU.getExported(2);
     
@@ -125,7 +142,7 @@ GPUTensor Manager::gpsCompassTensor() const
                      {impl_->cfg.numWorlds, 2, 2}, impl_->cfg.gpuID);
 }
 
-GPUTensor Manager::depthTensor() const
+MADRONA_EXPORT GPUTensor Manager::depthTensor() const
 {
     void *dev_ptr = impl_->mwGPU.depthObservations();
 

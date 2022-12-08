@@ -13,17 +13,19 @@ public:
         uint32_t numWorlds;
         uint32_t renderWidth;
         uint32_t renderHeight;
+        const char *episodeFile;
+        const char *dataDir;
     };
 
-    Manager(const Config &cfg);
-    ~Manager();
+    MADRONA_IMPORT Manager(const Config &cfg);
+    MADRONA_IMPORT ~Manager();
 
-    void step();
+    MADRONA_IMPORT void step();
 
-    madrona::py::GPUTensor resetTensor() const;
-    madrona::py::GPUTensor moveActionTensor() const;
-    madrona::py::GPUTensor gpsCompassTensor() const;
-    madrona::py::GPUTensor depthTensor() const;
+    MADRONA_IMPORT madrona::py::GPUTensor resetTensor() const;
+    MADRONA_IMPORT madrona::py::GPUTensor moveActionTensor() const;
+    MADRONA_IMPORT madrona::py::GPUTensor gpsCompassTensor() const;
+    MADRONA_IMPORT madrona::py::GPUTensor depthTensor() const;
 
 private:
     struct Impl;

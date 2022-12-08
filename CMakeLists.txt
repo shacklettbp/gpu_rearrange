@@ -10,5 +10,7 @@ project(MadronaGPURearrange LANGUAGES C CXX)
 include(setup)
 include(dependencies)
 
+find_package(ZLIB REQUIRED)
+
 add_subdirectory(external)
 add_subdirectory(src)

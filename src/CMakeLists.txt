@@ -15,6 +15,8 @@ madrona_build_compile_defns(
 
 add_library(gpu_rearrange_mgr SHARED
     mgr.hpp mgr.cpp
+    data.hpp data.cpp
+    gltf.hpp gltf.cpp
 )
 
 target_link_libraries(gpu_rearrange_mgr PRIVATE
@@ -22,6 +24,8 @@ target_link_libraries(gpu_rearrange_mgr PRIVATE
     madrona_mw_gpu
     madrona_common
     gpu_rearrange_gpu_srcs
+    simdjson
+    ZLIB::ZLIB
 )
 
 madrona_python_module(gpu_rearrange_python
@@ -29,5 +33,6 @@ madrona_python_module(gpu_rearrange_python
 )
 
 target_link_libraries(gpu_rearrange_python PRIVATE
+    madrona_hdrs
     gpu_rearrange_mgr
 )
