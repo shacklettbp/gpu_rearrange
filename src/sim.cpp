@@ -90,7 +90,7 @@ inline void actionSystem(Engine &, const Action &action,
         // Implement stop
     } break;
     case 1: {
-        Vector3 fwd = rot.rotateDir({0, 0, -1});
+        Vector3 fwd = rot.rotateDir({0, 0, 1});
         pos += fwd;
     } break;
     case 2: {
