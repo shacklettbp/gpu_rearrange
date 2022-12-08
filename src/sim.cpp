@@ -71,7 +71,7 @@ static void resetWorld(Engine &ctx)
     printf("End world reset\n");
 }
 
-static inline void resetSystem(Engine &ctx, WorldReset &reset)
+inline void resetSystem(Engine &ctx, WorldReset &reset)
 {
     if (!reset.resetNow) {
         return;
@@ -81,8 +81,8 @@ static inline void resetSystem(Engine &ctx, WorldReset &reset)
     resetWorld(ctx);
 }
 
-static inline void actionSystem(Engine &, const Action &action,
-                                Position &pos, Rotation &rot)
+inline void actionSystem(Engine &, const Action &action,
+                         Position &pos, Rotation &rot)
 {
     constexpr float turn_angle = helpers::toRadians(10.f);
 
@@ -107,12 +107,12 @@ static inline void actionSystem(Engine &, const Action &action,
     }
 }
 
-static inline void learningOutputsSystem(Engine &ctx,
-                                         GPSCompassObs &obs,
-                                         Reward &reward,
-                                         const Position agent_pos,
-                                         const Rotation agent_rot,
-                                         const Goal goal)
+inline void learningOutputsSystem(Engine &ctx,
+                                  GPSCompassObs &obs,
+                                  Reward &reward,
+                                  const Position agent_pos,
+                                  const Rotation agent_rot,
+                                  const Goal goal)
 {
     Vector3 to_object_start =
         agent_rot.rotateDir(goal.objectStartingPosition - agent_pos);
