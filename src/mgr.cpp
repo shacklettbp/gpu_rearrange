@@ -151,4 +151,13 @@ MADRONA_EXPORT GPUTensor Manager::depthTensor() const
                       impl_->cfg.renderWidth, 1}, impl_->cfg.gpuID);
 }
 
+MADRONA_EXPORT GPUTensor Manager::rgbTensor() const
+{
+    void *dev_ptr = impl_->mwGPU.rgbObservations();
+
+    return GPUTensor(dev_ptr, GPUTensor::ElementType::UInt8,
+                     {impl_->cfg.numWorlds, impl_->cfg.renderHeight,
+                      impl_->cfg.renderWidth, 4}, impl_->cfg.gpuID);
+}
+
 }

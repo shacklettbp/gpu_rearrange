@@ -26,6 +26,7 @@ public:
     MADRONA_IMPORT madrona::py::GPUTensor moveActionTensor() const;
     MADRONA_IMPORT madrona::py::GPUTensor gpsCompassTensor() const;
     MADRONA_IMPORT madrona::py::GPUTensor depthTensor() const;
+    MADRONA_IMPORT madrona::py::GPUTensor rgbTensor() const;
 
 private:
     struct Impl;

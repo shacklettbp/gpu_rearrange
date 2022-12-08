@@ -35,8 +35,11 @@ NB_MODULE(gpu_rearrange_python, m) {
            nb::arg("render_height"), nb::arg("episode_file"),
            nb::arg("data_dir"))
         .def("step", &Manager::step)
+        .def("reset_tensor", &Manager::resetTensor)
+        .def("move_action_tensor", &Manager::moveActionTensor)
         .def("gps_compass_tensor", &Manager::gpsCompassTensor)
         .def("depth_tensor", &Manager::depthTensor)
+        .def("rgb_tensor", &Manager::rgbTensor)
     ;
 }
 
