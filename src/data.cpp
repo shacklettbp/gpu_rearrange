@@ -118,6 +118,8 @@ struct ParsedInstance {
 
 struct ParsedScene {
     int64_t stageObjID;
+    math::Vector3 stageTranslation;
+    math::Quat stageRotation;
     std::vector<ParsedInstance> staticInstances;
 };
 
@@ -181,8 +183,11 @@ static const ParsedScene * parseScene(std::string_view scene_path,
     REQ_JSON(parse_data.sceneParser.iterate(json_data).get(scene_json));
 
     string_view stage_name;
-    REQ_JSON(scene_json["stage_instance"]["template_name"].
-             get(stage_name));
+    auto stage_inst = scene_json["stage_instance"];
+    REQ_JSON(stage_inst["template_name"].get(stage_name));
+
+    auto stage_translation = getVec3(stage_inst["translation"]);
+    auto stage_rotation = getQuat(stage_inst["rotation"], true);
 
     // FIXME
     std::string stage_path = parse_data.dataDir;
@@ -214,7 +219,7 @@ static const ParsedScene * parseScene(std::string_view scene_path,
         int64_t inst_obj_id = parseObject(obj_path, parse_data);
 
         math::Vector3 translation = getVec3(instance["translation"]);
-        math::Quat rotation = getQuat(instance["rotation"], false);
+        math::Quat rotation = getQuat(instance["rotation"], true);
 
         static_instances.push_back({
             .objID = inst_obj_id,
@@ -226,6 +231,8 @@ static const ParsedScene * parseScene(std::string_view scene_path,
 
     ParsedScene parsed_scene {
         .stageObjID = stage_obj_id,
+        .stageTranslation = stage_translation,
+        .stageRotation = stage_rotation,
         .staticInstances = std::move(static_instances),
     };
 
@@ -408,6 +415,10 @@ TrainingData TrainingData::load(const char *episode_file,
                 scale.x *= -1.f;
             }
 
+            assert(fabsf(scale.x - 1.f) < 0.1);
+            assert(fabsf(scale.y - 1.f) < 0.1);
+            assert(fabsf(scale.z - 1.f) < 0.1);
+
             auto v1 = (txfm.cols[0] / scale.x).normalize();
             auto v2 = txfm.cols[1] / scale.y;
             auto v3 = txfm.cols[2] / scale.z;
@@ -439,8 +450,8 @@ TrainingData TrainingData::load(const char *episode_file,
         int32_t inst_offset = parse_data.trainData.instances.size();
         parse_data.trainData.instances.push_back({
             int32_t(scene->stageObjID),
-            math::Vector3 {},
-            math::Quat { 0, 0, 1, 0 },
+            scene->stageTranslation,
+            scene->stageRotation,
         });
 
         for (const ParsedInstance &inst : scene->staticInstances) {

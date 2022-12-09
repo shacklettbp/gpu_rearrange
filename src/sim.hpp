@@ -62,7 +62,6 @@ struct Agent : public madrona::Archetype<
     Rotation,
     madrona::phys::CollisionAABB,
     madrona::phys::broadphase::LeafID,
-    madrona::render::ObjectID,
     madrona::render::ActiveView,
     Action,
     ObjectHeld,

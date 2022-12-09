@@ -44,6 +44,8 @@ while True:
         action = 2
     elif (key_action == 'd'):
         action = 3
+    elif (key_action == 's'):
+        action = 4
     else:
         print("Unknown action", key_action)
         sys.exit(1)

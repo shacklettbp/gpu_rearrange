@@ -42,7 +42,7 @@ static void resetWorld(Engine &ctx)
 
     Episode episode = episode_mgr.episodes[episode_idx];
 
-    assert(episode.numInstances <= max_instances);
+    assert(episode.numInstances == max_instances);
 
     Entity *dyn_entities = ctx.data().dynObjects;
     for (CountT i = 0; i < CountT(episode.numInstances); i++) {
@@ -90,16 +90,20 @@ inline void actionSystem(Engine &, const Action &action,
         // Implement stop
     } break;
     case 1: {
-        Vector3 fwd = rot.rotateDir({0, 0, 1});
+        Vector3 fwd = rot.rotateDir({0, 0, -1});
         pos += fwd;
     } break;
     case 2: {
-        const Quat left_rot = Quat::angleAxis(turn_angle, {0, 1, 0});
+        const Quat left_rot = Quat::angleAxis(-turn_angle, {0, 1, 0});
         rot = rot * left_rot;
     } break;
     case 3: {
-        const Quat right_rot = Quat::angleAxis(-turn_angle, {0, 1, 0});
+        const Quat right_rot = Quat::angleAxis(turn_angle, {0, 1, 0});
         rot = rot * right_rot;
+    } break;
+    case 4: {
+        Vector3 fwd = rot.rotateDir({0, 0, -1});
+        pos -= fwd;
     } break;
     default:
         break;
@@ -170,7 +174,7 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     : WorldBase(ctx),
       episodeMgr(init.episodeMgr)
 {
-    RigidBodyPhysicsSystem::init(ctx, 45, 100 * 50);
+    RigidBodyPhysicsSystem::init(ctx, max_instances + 1, 100 * 50);
 
     render::RenderingSystem::init(ctx);
 
@@ -182,9 +186,9 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     ctx.getUnsafe<broadphase::LeafID>(agent) =
         bp_bvh.reserveLeaf();
 
-    dynObjects = (Entity *)malloc(sizeof(Entity) * (max_instances - 1));
+    dynObjects = (Entity *)malloc(sizeof(Entity) * (max_instances));
 
-    for (CountT i = 0; i < max_instances - 1; i++) {
+    for (CountT i = 0; i < max_instances; i++) {
         dynObjects[i] = ctx.makeEntityNow<DynamicObject>();
         ctx.getUnsafe<broadphase::LeafID>(dynObjects[i]) =
             bp_bvh.reserveLeaf();

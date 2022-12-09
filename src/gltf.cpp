@@ -1358,7 +1358,7 @@ static vector<ParsedMesh> gltfParseMesh(
 struct InstanceProperties {
     uint32_t objectIndex;
     glm::mat4 txfm;
-    glm::mat4 normalTxfm;
+    glm::mat3 normalTxfm;
 };
 
 static std::vector<InstanceProperties> gltfParseInstances(
@@ -1386,7 +1386,7 @@ static std::vector<InstanceProperties> gltfParseInstances(
             instances.push_back({
                 cur_node.meshIdx,
                 cur_txfm,
-                glm::transpose(glm::inverse(cur_txfm)),
+                glm::transpose(glm::inverse(glm::mat3(cur_txfm))),
             });
         }
     }
@@ -1421,8 +1421,9 @@ int64_t loadAndParseGLTF(std::filesystem::path gltf_path, TrainingData &all_data
                 glm::vec4 pos { v.position.x, v.position.y, v.position.z, 1.f };
                 glm::vec4 txfm_pos = inst.txfm * pos;
 
-                glm::vec4 normal { v.normal.x, v.normal.y, v.normal.z, 0.f };
-                glm::vec4 txfm_normal = inst.normalTxfm * normal;
+                glm::vec3 normal { v.normal.x, v.normal.y, v.normal.z };
+                glm::vec3 txfm_normal =
+                    glm::normalize(inst.normalTxfm * normal);
                 new_vertices.push_back(render::SourceVertex {
                     .position = { txfm_pos.x, txfm_pos.y, txfm_pos.z },
                     .normal = { txfm_normal.x, txfm_normal.y, txfm_normal.z },
