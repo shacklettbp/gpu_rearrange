@@ -19,11 +19,11 @@ def get_single_char():
 
 sim = gpu_rearrange_python.RearrangeSimulator(
         gpu_id = 0,
-        num_worlds = 1,
+        num_worlds = 16,
         render_width = 1024,
         render_height = 1024,
-        episode_file = "/home/bps/rl/rearrange-data/datasets/replica_cad/rearrange/v1/train/rearrange_easy.json.gz",
-        data_dir = "/home/bps/rl/rearrange-data/"
+        episode_file = sys.argv[1],
+        data_dir = sys.argv[2]
 )
 
 actions = sim.move_action_tensor().to_torch()
@@ -34,7 +34,7 @@ print(rgb_observations.shape, rgb_observations.dtype)
 
 while True:
     sim.step()
-    torchvision.utils.save_image((rgb_observations[0].float() / 255).permute(2, 0, 1), "/tmp/t.png")
+    torchvision.utils.save_image((rgb_observations[0].float() / 255).permute(2, 0, 1), sys.argv[3])
 
     key_action = get_single_char()
 

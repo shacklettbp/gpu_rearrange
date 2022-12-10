@@ -44,6 +44,26 @@ static void resetWorld(Engine &ctx)
 
     assert(episode.numInstances == max_instances);
 
+    auto &bp_bvh = ctx.getSingleton<broadphase::BVH>();
+
+    auto reinit_entity = [&](Entity e, Position pos, Rotation rot) {
+        ctx.getUnsafe<Position>(e) = pos;
+        ctx.getUnsafe<Rotation>(e) = rot;
+
+        // FIXME, currently we have to update all this BVH related state
+        // in preparation for the rebuild at the end of this function.
+        // That's a bit silly because these values are updated
+        // in parallel later by the task graph. Ideally the BVH refit
+        // node should instead switch to some kind of conditional rebuild refit
+        // and not of this manual setup would be needed
+        CollisionAABB &aabb = ctx.getUnsafe<CollisionAABB>(e);
+        aabb = CollisionAABB(pos, rot);
+
+        broadphase::LeafID &leaf_id = ctx.getUnsafe<broadphase::LeafID>(e);
+        bp_bvh.updateLeaf(e, leaf_id, aabb);
+
+    };
+
     Entity *dyn_entities = ctx.data().dynObjects;
     for (CountT i = 0; i < CountT(episode.numInstances); i++) {
         InstanceInit instance_init =
@@ -51,15 +71,15 @@ static void resetWorld(Engine &ctx)
 
         Entity dyn_entity = dyn_entities[i];
 
+        reinit_entity(dyn_entity, instance_init.pos, instance_init.rot);
+
         ctx.getUnsafe<render::ObjectID>(dyn_entity).idx =
             instance_init.objectIndex;
-        ctx.getUnsafe<Position>(dyn_entity) = instance_init.pos;
-        ctx.getUnsafe<Rotation>(dyn_entity) = instance_init.rot;
     }
 
     Entity agent_entity = ctx.data().agent;
-    ctx.getUnsafe<Position>(agent_entity) = episode.agentPos;
-    ctx.getUnsafe<Rotation>(agent_entity) = episode.agentRot;
+
+    reinit_entity(agent_entity, episode.agentPos, episode.agentRot);
 
     Goal &goal_data = ctx.getUnsafe<Goal>(agent_entity);
     goal_data.objectStartingPosition = episode_mgr.instanceInits[
@@ -67,7 +87,7 @@ static void resetWorld(Engine &ctx)
     goal_data.goalPosition = episode.goalPos;
     goal_data.goalEntity = dyn_entities[episode.targetIdx];
 
-    ctx.getSingleton<broadphase::BVH>().rebuild();
+    bp_bvh.rebuild();
 }
 
 inline void resetSystem(Engine &ctx, WorldReset &reset)
@@ -186,7 +206,7 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     ctx.getUnsafe<broadphase::LeafID>(agent) =
         bp_bvh.reserveLeaf();
 
-    dynObjects = (Entity *)malloc(sizeof(Entity) * (max_instances));
+    dynObjects = (Entity *)rawAlloc(sizeof(Entity) * size_t(max_instances));
 
     for (CountT i = 0; i < max_instances; i++) {
         dynObjects[i] = ctx.makeEntityNow<DynamicObject>();
