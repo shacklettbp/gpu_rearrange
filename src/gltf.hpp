@@ -125,7 +125,11 @@ struct GLTFScene {
     std::vector<uint32_t> rootNodes;
 };
 
-int64_t loadAndParseGLTF(std::filesystem::path gltf_path, TrainingData &all_data);
+int64_t loadAndParseGLTF(std::filesystem::path gltf_path, 
+                         madrona::math::Vector3 right,
+                         madrona::math::Vector3 up,
+                         madrona::math::Vector3 fwd,
+                         TrainingData &all_data);
 
 
 }

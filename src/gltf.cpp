@@ -1394,7 +1394,11 @@ static std::vector<InstanceProperties> gltfParseInstances(
     return instances;
 }
 
-int64_t loadAndParseGLTF(std::filesystem::path gltf_path, TrainingData &all_data)
+int64_t loadAndParseGLTF(std::filesystem::path gltf_path,
+                         math::Vector3 right,
+                         math::Vector3 up,
+                         math::Vector3 fwd,
+                         TrainingData &all_data)
 {
     GLTFScene raw_scene = gltfLoad(gltf_path);
 
@@ -1405,7 +1409,12 @@ int64_t loadAndParseGLTF(std::filesystem::path gltf_path, TrainingData &all_data
         geometry.emplace_back(move(meshes));
     }
 
-    auto instances = gltfParseInstances(raw_scene, glm::mat4(1.f));
+    glm::mat4 base_txfm(glm::vec4(right.x, right.y, right.z, 0),
+                        glm::vec4(up.x, up.y, up.z, 0),
+                        glm::vec4(fwd.x, fwd.y, fwd.z, 0),
+                        glm::vec4(0, 0, 0, 1));
+
+    auto instances = gltfParseInstances(raw_scene, base_txfm);
 
     std::vector<render::SourceMesh> txfmed_meshes;
     for (const auto &inst : instances) {

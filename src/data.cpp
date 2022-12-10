@@ -141,7 +141,10 @@ struct ParseData {
 };
 
 static int64_t parseObject(std::string_view obj_path,
-                           ParseData &parse_data)
+                           ParseData &parse_data,
+                           math::Vector3 right = {1, 0, 0},
+                           math::Vector3 up = {0, 1, 0},
+                           math::Vector3 fwd = {0, 0, 1})
 {
     using namespace std;
 
@@ -153,7 +156,8 @@ static int64_t parseObject(std::string_view obj_path,
 
     std::cout << "'" << obj_path << "' " << std::endl;
 
-    int64_t obj_id = loadAndParseGLTF(obj_path, parse_data.trainData);
+    int64_t obj_id = loadAndParseGLTF(obj_path, right, up, fwd,
+                                      parse_data.trainData);
 
     auto [iter, success] = parse_data.parsedObjs.emplace(obj_path, obj_id);
     assert(success);
@@ -437,7 +441,10 @@ TrainingData TrainingData::load(const char *episode_file,
             obj_path += obj_prefix;
             obj_path += "/google_16k/textured.glb";
 
-            int64_t inst_obj_id = parseObject(obj_path, parse_data);
+            int64_t inst_obj_id = parseObject(obj_path, parse_data,
+                                              {-1, 0, 0},
+                                              {0, 1, 0},
+                                              {0, 0, -1});
 
             dyn_insts.push_back(ParsedInstance {
                 .objID = inst_obj_id,
