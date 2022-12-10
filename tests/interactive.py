@@ -19,7 +19,7 @@ def get_single_char():
 
 sim = gpu_rearrange_python.RearrangeSimulator(
         gpu_id = 0,
-        num_worlds = 16,
+        num_worlds = 1,
         render_width = 1024,
         render_height = 1024,
         episode_file = sys.argv[1],
