@@ -26,6 +26,7 @@ target_link_libraries(gpu_rearrange_mgr PRIVATE
     gpu_rearrange_gpu_srcs
     simdjson
     ZLIB::ZLIB
+    LibXml2::LibXml2
 )
 
 madrona_python_module(gpu_rearrange_python

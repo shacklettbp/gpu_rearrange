@@ -408,6 +408,7 @@ TrainingData TrainingData::load(const char *episode_file,
             auto row2 = getVec4(*++txfm_iter);
 
             auto txfm = math::Mat3x4::fromRows(row0, row1, row2);
+
             auto translation = txfm.cols[3];
             math::Vector3 scale {
                 txfm.cols[0].length(),
@@ -442,9 +443,10 @@ TrainingData TrainingData::load(const char *episode_file,
             obj_path += "/google_16k/textured.glb";
 
             int64_t inst_obj_id = parseObject(obj_path, parse_data,
-                                              {-1, 0, 0},
+                                              {1, 0, 0},
                                               {0, 1, 0},
                                               {0, 0, -1});
+
 
             dyn_insts.push_back(ParsedInstance {
                 .objID = inst_obj_id,
