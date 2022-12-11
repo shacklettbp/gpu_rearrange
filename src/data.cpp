@@ -267,7 +267,7 @@ static math::Quat urdfReadRPY(xmlTextReaderPtr reader)
     auto py_break = rpy_str.find(' ', rp_break + 1);
 
     auto r_str = rpy_str.substr(0, rp_break);
-    auto p_str = rpy_str.substr(rp_break + 1, py_break);
+    auto p_str = rpy_str.substr(rp_break + 1, py_break - rp_break - 1);
     auto y_str = rpy_str.substr(py_break + 1);
 
     float r;
@@ -283,7 +283,7 @@ static math::Quat urdfReadRPY(xmlTextReaderPtr reader)
     float y;
     std::from_chars(y_str.data(), y_str.data() + y_str.size(), y);
 
-    auto y_quat = math::Quat::angleAxis(r, {0, 0, 1});
+    auto y_quat = math::Quat::angleAxis(r, {0, 0, -1});
 
     // FIXME: order?
     auto rotation = y_quat * p_quat * r_quat;
@@ -307,7 +307,7 @@ static math::Vector3 urdfReadXYZ(xmlTextReaderPtr reader)
     auto yz_break = xyz_str.find(' ', xy_break + 1);
 
     auto x_str = xyz_str.substr(0, xy_break);
-    auto y_str = xyz_str.substr(xy_break + 1, yz_break);
+    auto y_str = xyz_str.substr(xy_break + 1, yz_break - xy_break - 1);
     auto z_str = xyz_str.substr(yz_break + 1);
 
     float x;
