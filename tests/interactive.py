@@ -17,6 +17,23 @@ def get_single_char():
 
     return ch
 
+def get_keyboard_action():
+    while True:
+        key_action = get_single_char()
+
+        if key_action == 'w':
+            return 1
+        elif key_action == 'a':
+            return 2
+        elif key_action == 'd':
+            return 3
+        elif key_action == 's':
+            return  4
+        elif key_action == 'q':
+            return -1
+        else:
+            continue
+
 sim = gpu_rearrange_python.RearrangeSimulator(
         gpu_id = 0,
         num_worlds = 1,
@@ -31,23 +48,13 @@ rgb_observations = sim.rgb_tensor().to_torch()
 print(actions.shape, actions.dtype)
 print(rgb_observations.shape, rgb_observations.dtype)
 
-
 while True:
     sim.step()
     torchvision.utils.save_image((rgb_observations[0].float() / 255).permute(2, 0, 1), sys.argv[3])
 
-    key_action = get_single_char()
+    action = get_keyboard_action()
 
-    if (key_action == 'w'):
-        action = 1
-    elif (key_action == 'a'):
-        action = 2
-    elif (key_action == 'd'):
-        action = 3
-    elif (key_action == 's'):
-        action = 4
-    else:
-        print("Unknown action", key_action)
-        sys.exit(1)
+    if action == -1:
+        break
 
     actions[0][0] = action

@@ -1394,11 +1394,8 @@ static std::vector<InstanceProperties> gltfParseInstances(
     return instances;
 }
 
-int64_t loadAndParseGLTF(std::filesystem::path gltf_path,
-                         math::Vector3 right,
-                         math::Vector3 up,
-                         math::Vector3 fwd,
-                         TrainingData &all_data)
+MergedSourceObject loadAndParseGLTF(std::filesystem::path gltf_path,
+                                  const madrona::math::Mat3x4 &base_txfm_raw)
 {
     GLTFScene raw_scene = gltfLoad(gltf_path);
 
@@ -1409,14 +1406,32 @@ int64_t loadAndParseGLTF(std::filesystem::path gltf_path,
         geometry.emplace_back(move(meshes));
     }
 
-    glm::mat4 base_txfm(glm::vec4(right.x, right.y, right.z, 0),
-                        glm::vec4(up.x, up.y, up.z, 0),
-                        glm::vec4(fwd.x, fwd.y, fwd.z, 0),
-                        glm::vec4(0, 0, 0, 1));
+    glm::mat4 base_txfm(
+        glm::vec4(
+            base_txfm_raw.cols[0].x,
+            base_txfm_raw.cols[0].y,
+            base_txfm_raw.cols[0].z,
+            0),
+        glm::vec4(
+            base_txfm_raw.cols[1].x,
+            base_txfm_raw.cols[1].y,
+            base_txfm_raw.cols[1].z,
+            0),
+        glm::vec4(
+            base_txfm_raw.cols[2].x,
+            base_txfm_raw.cols[2].y,
+            base_txfm_raw.cols[2].z,
+            0),
+        glm::vec4(
+            base_txfm_raw.cols[3].x,
+            base_txfm_raw.cols[3].y,
+            base_txfm_raw.cols[3].z,
+            1));
 
     auto instances = gltfParseInstances(raw_scene, base_txfm);
 
-    std::vector<render::SourceMesh> txfmed_meshes;
+    MergedSourceObject merged;
+
     for (const auto &inst : instances) {
         const auto &src_obj_meshes = geometry[inst.objectIndex];
         for (const ParsedMesh &src_mesh : src_obj_meshes) {
@@ -1441,27 +1456,19 @@ int64_t loadAndParseGLTF(std::filesystem::path gltf_path,
                 });
             }
 
-            all_data.vertices.emplace_back(std::move(new_vertices));
-            all_data.indices.emplace_back(std::move(new_indices));
+            merged.vertices.emplace_back(std::move(new_vertices));
+            merged.indices.emplace_back(std::move(new_indices));
 
             render::SourceMesh txfm_mesh {
-                Span<const render::SourceVertex>(all_data.vertices.back()),
-                Span<const uint32_t>(all_data.indices.back()),
+                Span<const render::SourceVertex>(merged.vertices.back()),
+                Span<const uint32_t>(merged.indices.back()),
             };
 
-            txfmed_meshes.push_back(txfm_mesh);
+            merged.meshes.push_back(txfm_mesh);
         }
     }
 
-    all_data.meshes.emplace_back(std::move(txfmed_meshes));
-
-    int64_t obj_offset = all_data.objects.size();
-
-    all_data.objects.push_back({
-        Span<const render::SourceMesh>(all_data.meshes.back()),
-    });
-
-    return obj_offset;
+    return merged;
 }
 
 }

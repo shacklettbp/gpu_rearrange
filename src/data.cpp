@@ -5,7 +5,9 @@
 
 #include <simdjson.h>
 #include <zlib.h>
+#include <libxml/xmlreader.h>
 
+#include <charconv>
 #include <iostream>
 #include <filesystem>
 #include <unordered_map>
@@ -120,7 +122,7 @@ struct ParsedScene {
     int64_t stageObjID;
     math::Vector3 stageTranslation;
     math::Quat stageRotation;
-    std::vector<ParsedInstance> staticInstances;
+    std::vector<ParsedInstance> additionalInstances;
 };
 
 struct ParsedEpisode {
@@ -140,11 +142,293 @@ struct ParseData {
     TrainingData trainData {};
 };
 
-static int64_t parseObject(std::string_view obj_path,
-                           ParseData &parse_data,
-                           math::Vector3 right = {1, 0, 0},
-                           math::Vector3 up = {0, 1, 0},
-                           math::Vector3 fwd = {0, 0, 1})
+struct URDFLinkState {
+    math::Vector3 translation;
+    math::Quat rotation;
+    std::string renderModel;
+};
+
+struct URDFJointState {
+    math::Vector3 translation;
+    math::Quat rotation;
+    std::string parent;
+    std::string child;
+};
+
+static math::Quat urdfReadRPY(xmlTextReaderPtr reader)
+{
+    auto xml_rpy =
+        xmlTextReaderGetAttribute(reader, BAD_CAST "rpy");
+    if (xml_rpy == nullptr) {
+        return { 1, 0, 0, 0 };
+    }
+
+    std::string_view rpy_str((char *)xml_rpy);
+    auto rp_break = rpy_str.find(' ');
+    auto py_break = rpy_str.find(' ', rp_break + 1);
+
+    auto r_str = rpy_str.substr(0, rp_break);
+    auto p_str = rpy_str.substr(rp_break + 1, py_break);
+    auto y_str = rpy_str.substr(py_break + 1);
+
+    float r;
+    std::from_chars(r_str.data(), r_str.data() + r_str.size(), r);
+
+    auto r_quat = math::Quat::angleAxis(r, {1, 0, 0});
+
+    float p;
+    std::from_chars(p_str.data(), p_str.data() + p_str.size(), p);
+
+    auto p_quat = math::Quat::angleAxis(r, {0, 1, 0});
+
+    float y;
+    std::from_chars(y_str.data(), y_str.data() + y_str.size(), y);
+
+    auto y_quat = math::Quat::angleAxis(r, {0, 0, 1});
+
+    // FIXME: order?
+    auto rotation = y_quat * p_quat * r_quat;
+
+    xmlFree(xml_rpy);
+
+    return rotation;
+}
+
+static math::Vector3 urdfReadXYZ(xmlTextReaderPtr reader)
+{
+    auto xml_xyz =
+        xmlTextReaderGetAttribute(reader, BAD_CAST "xyz");
+
+    if (xml_xyz == nullptr) {
+        return { 0, 0, 0 };
+    }
+
+    std::string_view xyz_str((char *)xml_xyz);
+    auto xy_break = xyz_str.find(' ');
+    auto yz_break = xyz_str.find(' ', xy_break + 1);
+
+    auto x_str = xyz_str.substr(0, xy_break);
+    auto y_str = xyz_str.substr(xy_break + 1, yz_break);
+    auto z_str = xyz_str.substr(yz_break + 1);
+
+    float x;
+    std::from_chars(x_str.data(), x_str.data() + x_str.size(), x);
+
+    float y;
+    std::from_chars(y_str.data(), y_str.data() + y_str.size(), y);
+
+    float z;
+    std::from_chars(z_str.data(), z_str.data() + z_str.size(), z);
+
+    xmlFree(xml_xyz);
+
+    return { x, y, z };
+}
+
+static MergedSourceObject parseURDF(std::string_view obj_path,
+                                    const math::Mat3x4 &base_txfm)
+{
+    xmlTextReaderPtr reader = xmlNewTextReaderFilename(
+        std::string(obj_path).c_str());
+
+    if (reader == nullptr) {
+        FATAL("Failed to load URDF file: %.*s", (int)obj_path.size(),
+              obj_path.data());
+    }
+
+    auto current_joint = Optional<URDFJointState>::none();
+    auto current_link =
+        Optional<std::pair<std::string, URDFLinkState>>::none();
+    bool in_visual = false;
+
+    std::unordered_map<std::string, URDFLinkState> links;
+    std::vector<URDFJointState> joints;
+
+    auto invalid = [&](const char *msg) {
+        xmlNodePtr cur_node = xmlTextReaderCurrentNode(reader);
+        int line_no = xmlGetLineNo(cur_node);
+
+        FATAL("URDF parsing error: %s, %.*s at line %d",
+              msg, (int)obj_path.size(), obj_path.data(), line_no);
+    };
+
+    auto urdfMatch = [](const xmlChar *tag, const char *name) {
+        return xmlStrcmp(tag, BAD_CAST name) == 0;
+    };
+
+    auto process = [&](xmlTextReaderPtr reader) {
+        auto tag_name = xmlTextReaderConstName(reader);
+        int node_type = xmlTextReaderNodeType(reader);
+        bool elem_start = node_type == XML_READER_TYPE_ELEMENT;
+        bool elem_end = node_type == XML_READER_TYPE_END_ELEMENT;
+
+        if (tag_name == nullptr || (!elem_start && !elem_end)) {
+            return;
+        }
+
+        if (urdfMatch(tag_name, "joint")) {
+            if (elem_start) {
+                assert(!current_joint.has_value());
+
+                current_joint = URDFJointState {
+                    .translation = math::Vector3 { 0, 0, 0 },
+                    .rotation = math::Quat { 1, 0, 0, 0 },
+                    .parent = "",
+                    .child = "",
+                };
+            } else if (elem_end) {
+                if (!current_joint.has_value() ||
+                        current_joint->child == "" ||
+                        current_joint->parent == "") {
+                    invalid("Incomplete joint");
+                }
+
+                joints.emplace_back(*current_joint);
+                current_joint.reset();
+            }
+        } else if (urdfMatch(tag_name, "parent") && elem_start) {
+            char *parent_name = (char *)
+                xmlTextReaderGetAttribute(reader, BAD_CAST "link");
+
+            if (!parent_name || !current_joint.has_value()) {
+                invalid("Parent tag outside joint");
+            }
+
+            current_joint->parent = parent_name;
+
+            xmlFree(parent_name);
+        } else if (urdfMatch(tag_name, "child") && elem_start) {
+            char *child_name = (char *)
+                xmlTextReaderGetAttribute(reader, BAD_CAST "link");
+
+            if (!child_name || !current_joint.has_value()) {
+                invalid("Child tag outside joint");
+            }
+
+            current_joint->child = child_name;
+            xmlFree(child_name);
+        } else if (urdfMatch(tag_name, "link")) {
+            if (elem_start) {
+                char *link_name = (char *)
+                    xmlTextReaderGetAttribute(reader, BAD_CAST "name");
+
+                if (!link_name || current_link.has_value()) {
+                    invalid("Link missing name");
+                }
+
+                current_link = std::pair {
+                    std::string(link_name),
+                    URDFLinkState {
+                        .translation = { 0, 0, 0 },
+                        .rotation = { 1, 0, 0, 0 },
+                        .renderModel = "",
+                    },
+                };
+            } else if (elem_end) {
+                if (!current_link.has_value()) {
+                    invalid("Double link closing tag");
+                }
+
+                links.emplace(std::move(*current_link));
+                current_link.reset();
+            }
+        } else if (current_link.has_value() && urdfMatch(tag_name, "visual")) {
+            if (elem_start) {
+                if (in_visual) {
+                    invalid("Repeat visual tag");
+                }
+
+                in_visual = true;
+            }
+
+            if (elem_end) {
+                if (!in_visual) {
+                    invalid("Visual closing tag without start");
+                }
+
+                in_visual = false;
+            }
+        } else if (urdfMatch(tag_name, "origin") && elem_start) {
+            if (current_joint.has_value()) {
+                current_joint->translation = urdfReadXYZ(reader);
+                current_joint->rotation = urdfReadRPY(reader);
+            }
+
+            if (current_link.has_value() && in_visual) {
+                current_link->second.translation = urdfReadXYZ(reader);
+                current_link->second.rotation = urdfReadRPY(reader);
+            }
+        } else if (in_visual && urdfMatch(tag_name, "mesh") && elem_start) {
+            char *filename = (char *)
+                xmlTextReaderGetAttribute(reader, BAD_CAST "filename");
+
+            if (!filename) {
+                invalid("Mesh tag missing filename");
+            }
+
+            current_link->second.renderModel = filename;
+            xmlFree(filename);
+        }
+    };
+
+    int ret;
+    while ((ret = xmlTextReaderRead(reader)) == 1) {
+        process(reader);
+    }
+
+    if (ret != 0) {
+        FATAL("Failed to parse URDF file: %.*s", (int)obj_path.size(),
+              obj_path.data());
+    }
+
+    xmlTextReaderClose(reader);
+
+    // FIXME: Assumes the joints are listed in depth first order, doesn't
+    // handle rotation
+    for (const URDFJointState &joint : joints) {
+        const URDFLinkState &parent_link = links.find(joint.parent)->second;
+        URDFLinkState &child_link = links.find(joint.child)->second;
+
+        math::Vector3 cur_translation =
+            parent_link.translation + joint.translation;
+
+        child_link.translation += cur_translation;
+    }
+
+    std::string_view dir_name = obj_path.substr(0, obj_path.rfind('/'));
+
+    MergedSourceObject all_merged;
+    for (const auto &[name, link] : links) {
+        if (link.renderModel == "") {
+            continue;
+        }
+
+        std::string path(dir_name);
+        path += "/";
+        path += link.renderModel;
+
+        MergedSourceObject sub = loadAndParseGLTF(path,
+            math::Mat3x4::fromTRS(link.translation, link.rotation));
+
+        for (auto &vert_list : sub.vertices) {
+            all_merged.vertices.emplace_back(std::move(vert_list));
+        }
+
+        for (auto &idx_list : sub.indices) {
+            all_merged.indices.emplace_back(std::move(idx_list));
+        }
+
+        for (auto &mesh : sub.meshes) {
+            all_merged.meshes.emplace_back(std::move(mesh));
+        }
+    }
+
+    return all_merged;
+}
+
+static int64_t parseObject(std::string_view obj_path, ParseData &parse_data,
+    bool is_urdf = false, const math::Mat3x4 &base_txfm = 
+        math::Mat3x4::fromTRS({ 0, 0, 0 }, { 1, 0, 0, 0 }))
 {
     using namespace std;
 
@@ -156,8 +440,25 @@ static int64_t parseObject(std::string_view obj_path,
 
     std::cout << "'" << obj_path << "' " << std::endl;
 
-    int64_t obj_id = loadAndParseGLTF(obj_path, right, up, fwd,
-                                      parse_data.trainData);
+    MergedSourceObject obj = is_urdf ? 
+        parseURDF(obj_path, base_txfm) :
+        loadAndParseGLTF(obj_path, base_txfm);
+
+    for (auto &vert_list : obj.vertices) {
+        parse_data.trainData.vertices.emplace_back(std::move(vert_list));
+    }
+
+    for (auto &idx_list : obj.indices) {
+        parse_data.trainData.indices.emplace_back(std::move(idx_list));
+    }
+
+    parse_data.trainData.meshes.emplace_back(std::move(obj.meshes));
+
+    int64_t obj_id = parse_data.trainData.objects.size();
+
+    parse_data.trainData.objects.push_back({
+        Span<const render::SourceMesh>(parse_data.trainData.meshes.back()),
+    });
 
     auto [iter, success] = parse_data.parsedObjs.emplace(obj_path, obj_id);
     assert(success);
@@ -201,7 +502,7 @@ static const ParsedScene * parseScene(std::string_view scene_path,
 
     int64_t stage_obj_id = parseObject(stage_path, parse_data);
 
-    vector<ParsedInstance> static_instances;
+    vector<ParsedInstance> additional_instances;
 
     simdjson::ondemand::array instances_arr;
     REQ_JSON(scene_json["object_instances"].get(instances_arr));
@@ -225,7 +526,51 @@ static const ParsedScene * parseScene(std::string_view scene_path,
         math::Vector3 translation = getVec3(instance["translation"]);
         math::Quat rotation = getQuat(instance["rotation"], true);
 
-        static_instances.push_back({
+        additional_instances.push_back({
+            .objID = inst_obj_id,
+            .translation = translation,
+            .rotation = rotation,
+            .dynamic = false,
+        });
+    }
+
+    simdjson::ondemand::array articulated_instances_arr;
+    REQ_JSON(scene_json["articulated_object_instances"].get(
+            articulated_instances_arr));
+
+    auto find_urdf = [](string_view dir, string_view obj_name) {
+        std::string filename = std::string(obj_name) + ".urdf";
+
+        for (const auto &dir_entry :
+             std::filesystem::recursive_directory_iterator(dir)) {
+            if (!dir_entry.is_regular_file()) {
+                continue;
+            }
+
+            const std::filesystem::path &path = dir_entry.path();
+
+            if (path.filename() == filename) {
+                return path.string();
+            }
+        }
+
+        FATAL("Could not find URDF for %s", obj_name);
+    };
+
+    std::string urdf_dir = parse_data.dataDir;
+    urdf_dir += "replica_cad/urdf/";
+    for (auto instance : articulated_instances_arr) {
+        string_view obj_name;
+        REQ_JSON(instance["template_name"].get(obj_name));
+
+        math::Vector3 translation = getVec3(instance["translation"]);
+        math::Quat rotation = getQuat(instance["rotation"], true);
+
+        std::string urdf_path = find_urdf(urdf_dir, obj_name);
+
+        int64_t inst_obj_id = parseObject(urdf_path, parse_data, true);
+
+        additional_instances.push_back({
             .objID = inst_obj_id,
             .translation = translation,
             .rotation = rotation,
@@ -237,7 +582,7 @@ static const ParsedScene * parseScene(std::string_view scene_path,
         .stageObjID = stage_obj_id,
         .stageTranslation = stage_translation,
         .stageRotation = stage_rotation,
-        .staticInstances = std::move(static_instances),
+        .additionalInstances = std::move(additional_instances),
     };
 
     auto [iter, success] =
@@ -442,11 +787,7 @@ TrainingData TrainingData::load(const char *episode_file,
             obj_path += obj_prefix;
             obj_path += "/google_16k/textured.glb";
 
-            int64_t inst_obj_id = parseObject(obj_path, parse_data,
-                                              {1, 0, 0},
-                                              {0, 1, 0},
-                                              {0, 0, -1});
-
+            int64_t inst_obj_id = parseObject(obj_path, parse_data, false);
 
             dyn_insts.push_back(ParsedInstance {
                 .objID = inst_obj_id,
@@ -463,7 +804,7 @@ TrainingData TrainingData::load(const char *episode_file,
             scene->stageRotation,
         });
 
-        for (const ParsedInstance &inst : scene->staticInstances) {
+        for (const ParsedInstance &inst : scene->additionalInstances) {
             parse_data.trainData.instances.push_back({
                 int32_t(inst.objID),
                 inst.translation,
