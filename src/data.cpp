@@ -17,6 +17,93 @@ using namespace madrona;
 
 namespace GPURearrange {
 
+static inline math::Quat rotToQuat(
+    math::Vector3 a, math::Vector3 b, math::Vector3 c)
+{
+    /* Modified from glm::quat_cast
+ ==============================================================================
+The MIT License
+-------------------------------------------------------------------------------
+Copyright (c) 2005 - G-Truc Creation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+    float fourXSquaredMinus1 = a.x - b.y - c.z;
+	float fourYSquaredMinus1 = b.y - a.x - c.z;
+	float fourZSquaredMinus1 = c.z - a.x - b.y;
+	float fourWSquaredMinus1 = a.x + b.y + c.z;
+
+	int biggestIndex = 0;
+	float fourBiggestSquaredMinus1 = fourWSquaredMinus1;
+	if(fourXSquaredMinus1 > fourBiggestSquaredMinus1)
+	{
+		fourBiggestSquaredMinus1 = fourXSquaredMinus1;
+		biggestIndex = 1;
+	}
+	if(fourYSquaredMinus1 > fourBiggestSquaredMinus1)
+	{
+		fourBiggestSquaredMinus1 = fourYSquaredMinus1;
+		biggestIndex = 2;
+	}
+	if(fourZSquaredMinus1 > fourBiggestSquaredMinus1)
+	{
+		fourBiggestSquaredMinus1 = fourZSquaredMinus1;
+		biggestIndex = 3;
+	}
+
+	float biggestVal = sqrtf(fourBiggestSquaredMinus1 + 1.f) * 0.5f;
+	float mult = 0.25f / biggestVal;
+
+	switch(biggestIndex) {
+	case 0:
+		return {
+            biggestVal, 
+            (b.z - c.y) * mult,
+            (c.x - a.z) * mult,
+            (a.y - b.x) * mult,
+        };
+	case 1:
+		return {
+            (b.z - c.y) * mult,
+            biggestVal,
+            (a.y + b.x) * mult,
+            (c.x + a.z) * mult,
+        }; case 2:
+		return {
+            (c.x - a.z) * mult,
+            (a.y + b.x) * mult,
+            biggestVal,
+            (b.z + c.y) * mult,
+        };
+	case 3:
+		return {
+            (a.y - b.x) * mult,
+            (c.x + a.z) * mult,
+            (b.z + c.y) * mult,
+            biggestVal,
+        };
+	default:
+		assert(false);
+	}
+}
+
 static inline void checkSIMDJsonResult(
     simdjson::error_code err,
     const char *file,
@@ -153,6 +240,18 @@ struct URDFJointState {
     math::Quat rotation;
     std::string parent;
     std::string child;
+};
+
+struct URDFGraphNode {
+    struct Edge {
+        math::Mat3x4 transform;
+        int32_t child;
+    };
+
+    std::string model;
+    math::Mat3x4 transform;
+    int32_t parent;
+    std::vector<Edge> edges;
 };
 
 static math::Quat urdfReadRPY(xmlTextReaderPtr reader)
@@ -383,43 +482,90 @@ static MergedSourceObject parseURDF(std::string_view obj_path,
 
     xmlTextReaderClose(reader);
 
-    // FIXME: Assumes the joints are listed in depth first order, doesn't
-    // handle rotation
-    for (const URDFJointState &joint : joints) {
-        const URDFLinkState &parent_link = links.find(joint.parent)->second;
-        URDFLinkState &child_link = links.find(joint.child)->second;
+    std::vector<URDFGraphNode> urdf_graph;
+    urdf_graph.reserve(links.size());
 
-        math::Vector3 cur_translation =
-            parent_link.translation + joint.translation;
+    std::unordered_map<std::string_view, int32_t> name_to_node;
 
-        child_link.translation += cur_translation;
+    for (const auto &[name, link] : links) {
+        urdf_graph.push_back({
+            .model = link.renderModel,
+            .transform = math::Mat3x4::fromTRS(link.translation,
+                                               link.rotation),
+            .parent = -1,
+            .edges = {},
+        });
+
+        name_to_node.emplace(name, int32_t(urdf_graph.size() - 1));
     }
 
-    std::string_view dir_name = obj_path.substr(0, obj_path.rfind('/'));
+    for (const URDFJointState &joint : joints) {
+        int32_t parent_idx = name_to_node.find(joint.parent)->second;
+        int32_t child_idx = name_to_node.find(joint.child)->second;
+
+        auto &parent_node = urdf_graph[parent_idx];
+        auto &child_node = urdf_graph[child_idx];
+
+        child_node.parent = parent_idx;
+        parent_node.edges.push_back({
+            .transform = math::Mat3x4::fromTRS(joint.translation,
+                                               joint.rotation),
+            .child = child_idx,
+        });
+    }
+
+    int32_t root_idx = -1;
+    for (size_t i = 0; i < urdf_graph.size(); i++) {
+        if (urdf_graph[i].parent == -1) {
+            assert(root_idx == -1);
+            root_idx = (int32_t)i;
+        }
+    }
+    assert(root_idx != -1);
+
+    urdf_graph[root_idx].transform =
+        base_txfm.compose(urdf_graph[root_idx].transform);
 
     MergedSourceObject all_merged;
-    for (const auto &[name, link] : links) {
-        if (link.renderModel == "") {
-            continue;
+    std::string_view dir_name = obj_path.substr(0, obj_path.rfind('/'));
+
+    std::vector<int32_t> node_stack;
+    node_stack.reserve(urdf_graph.size());
+    node_stack.push_back(root_idx);
+
+    while (node_stack.size() > 0) {
+        int32_t cur_node_idx = node_stack.back();
+        node_stack.pop_back();
+        const auto &cur_node = urdf_graph[cur_node_idx];
+
+        auto cur_txfm = cur_node.transform;
+
+        if (cur_node.model != "") {
+            std::string path(dir_name);
+            path += "/";
+            path += cur_node.model;
+            MergedSourceObject sub = loadAndParseGLTF(path, cur_txfm);
+
+            for (auto &vert_list : sub.vertices) {
+                all_merged.vertices.emplace_back(std::move(vert_list));
+            }
+
+            for (auto &idx_list : sub.indices) {
+                all_merged.indices.emplace_back(std::move(idx_list));
+            }
+
+            for (auto &mesh : sub.meshes) {
+                all_merged.meshes.emplace_back(std::move(mesh));
+            }
         }
 
-        std::string path(dir_name);
-        path += "/";
-        path += link.renderModel;
+        for (const auto &edge : cur_node.edges) {
+            auto &child_node = urdf_graph[edge.child];
 
-        MergedSourceObject sub = loadAndParseGLTF(path,
-            math::Mat3x4::fromTRS(link.translation, link.rotation));
+            child_node.transform =
+                cur_txfm.compose(edge.transform).compose(child_node.transform);
 
-        for (auto &vert_list : sub.vertices) {
-            all_merged.vertices.emplace_back(std::move(vert_list));
-        }
-
-        for (auto &idx_list : sub.indices) {
-            all_merged.indices.emplace_back(std::move(idx_list));
-        }
-
-        for (auto &mesh : sub.meshes) {
-            all_merged.meshes.emplace_back(std::move(mesh));
+            node_stack.push_back(edge.child);
         }
     }
 
@@ -590,93 +736,6 @@ static const ParsedScene * parseScene(std::string_view scene_path,
     assert(success);
 
     return &iter->second;
-}
-
-static inline math::Quat rotToQuat(
-    math::Vector3 a, math::Vector3 b, math::Vector3 c)
-{
-    /* Modified from glm::quat_cast
- ==============================================================================
-The MIT License
--------------------------------------------------------------------------------
-Copyright (c) 2005 - G-Truc Creation
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
-
-    float fourXSquaredMinus1 = a.x - b.y - c.z;
-	float fourYSquaredMinus1 = b.y - a.x - c.z;
-	float fourZSquaredMinus1 = c.z - a.x - b.y;
-	float fourWSquaredMinus1 = a.x + b.y + c.z;
-
-	int biggestIndex = 0;
-	float fourBiggestSquaredMinus1 = fourWSquaredMinus1;
-	if(fourXSquaredMinus1 > fourBiggestSquaredMinus1)
-	{
-		fourBiggestSquaredMinus1 = fourXSquaredMinus1;
-		biggestIndex = 1;
-	}
-	if(fourYSquaredMinus1 > fourBiggestSquaredMinus1)
-	{
-		fourBiggestSquaredMinus1 = fourYSquaredMinus1;
-		biggestIndex = 2;
-	}
-	if(fourZSquaredMinus1 > fourBiggestSquaredMinus1)
-	{
-		fourBiggestSquaredMinus1 = fourZSquaredMinus1;
-		biggestIndex = 3;
-	}
-
-	float biggestVal = sqrtf(fourBiggestSquaredMinus1 + 1.f) * 0.5f;
-	float mult = 0.25f / biggestVal;
-
-	switch(biggestIndex) {
-	case 0:
-		return {
-            biggestVal, 
-            (b.z - c.y) * mult,
-            (c.x - a.z) * mult,
-            (a.y - b.x) * mult,
-        };
-	case 1:
-		return {
-            (b.z - c.y) * mult,
-            biggestVal,
-            (a.y + b.x) * mult,
-            (c.x + a.z) * mult,
-        }; case 2:
-		return {
-            (c.x - a.z) * mult,
-            (a.y + b.x) * mult,
-            biggestVal,
-            (b.z + c.y) * mult,
-        };
-	case 3:
-		return {
-            (a.y - b.x) * mult,
-            (c.x + a.z) * mult,
-            (b.z + c.y) * mult,
-            biggestVal,
-        };
-	default:
-		assert(false);
-	}
 }
 
 TrainingData TrainingData::load(const char *episode_file,
