@@ -202,6 +202,7 @@ struct ParsedInstance {
     int64_t objID;
     math::Vector3 translation;
     math::Quat rotation;
+    math::Vector3 scale;
     bool dynamic;
 };
 
@@ -273,12 +274,12 @@ static math::Quat urdfReadRPY(xmlTextReaderPtr reader)
     float r;
     std::from_chars(r_str.data(), r_str.data() + r_str.size(), r);
 
-    auto r_quat = math::Quat::angleAxis(r, {1, 0, 0});
+    auto r_quat = math::Quat::angleAxis(r, {0, 1, 0});
 
     float p;
     std::from_chars(p_str.data(), p_str.data() + p_str.size(), p);
 
-    auto p_quat = math::Quat::angleAxis(r, {0, 1, 0});
+    auto p_quat = math::Quat::angleAxis(r, {1, 0, 0});
 
     float y;
     std::from_chars(y_str.data(), y_str.data() + y_str.size(), y);
@@ -286,7 +287,7 @@ static math::Quat urdfReadRPY(xmlTextReaderPtr reader)
     auto y_quat = math::Quat::angleAxis(r, {0, 0, -1});
 
     // FIXME: order?
-    auto rotation = y_quat * p_quat * r_quat;
+    auto rotation = r_quat * p_quat * y_quat;
 
     xmlFree(xml_rpy);
 
@@ -544,6 +545,7 @@ static MergedSourceObject parseURDF(std::string_view obj_path,
             std::string path(dir_name);
             path += "/";
             path += cur_node.model;
+            
             MergedSourceObject sub = loadAndParseGLTF(path, cur_txfm);
 
             for (auto &vert_list : sub.vertices) {
@@ -573,8 +575,7 @@ static MergedSourceObject parseURDF(std::string_view obj_path,
 }
 
 static int64_t parseObject(std::string_view obj_path, ParseData &parse_data,
-    bool is_urdf = false, const math::Mat3x4 &base_txfm = 
-        math::Mat3x4::fromTRS({ 0, 0, 0 }, { 1, 0, 0, 0 }))
+                           bool is_urdf, const math::Mat3x4 &base_txfm)
 {
     using namespace std;
 
@@ -586,8 +587,17 @@ static int64_t parseObject(std::string_view obj_path, ParseData &parse_data,
 
     std::cout << "'" << obj_path << "' " << std::endl;
 
+    auto urdfBaseTXFM = [](math::Mat3x4 base_txfm) {
+        return base_txfm.compose({{
+            { 0, 0, -1 },
+            { 1, 0, 0 },
+            { 0, 1, 0 },
+            { 0, 0, 0 },
+        }});
+    };
+
     MergedSourceObject obj = is_urdf ? 
-        parseURDF(obj_path, base_txfm) :
+        parseURDF(obj_path, urdfBaseTXFM(base_txfm)) :
         loadAndParseGLTF(obj_path, base_txfm);
 
     for (auto &vert_list : obj.vertices) {
@@ -611,6 +621,27 @@ static int64_t parseObject(std::string_view obj_path, ParseData &parse_data,
 
     return obj_id;
 }
+
+static constexpr math::Mat3x4 habitat_txfm {{
+    { 1, 0, 0, },
+    { 0, 0, 1, },
+    { 0, -1, 0, },
+    { 0, 0, 0, },
+}};
+
+static constexpr math::Mat3x4 urdf_txfm {{
+    { 0, 0, 1, },
+    { 0, 1, 0, },
+    { -1, 0, 0, },
+    { 0, 0, 0, },
+}};
+
+static constexpr math::Mat3x4 ycb_txfm {{
+    { 1, 0, 0, },
+    { 0, 0, 1, },
+    { 0, 1, 0, },
+    { 0, 0, 0, },
+}};
 
 static const ParsedScene * parseScene(std::string_view scene_path,
                                       ParseData &parse_data)
@@ -646,7 +677,8 @@ static const ParsedScene * parseScene(std::string_view scene_path,
     stage_path += stage_name;
     stage_path += ".glb";
 
-    int64_t stage_obj_id = parseObject(stage_path, parse_data);
+    int64_t stage_obj_id =
+        parseObject(stage_path, parse_data, false, habitat_txfm);
 
     vector<ParsedInstance> additional_instances;
 
@@ -667,7 +699,8 @@ static const ParsedScene * parseScene(std::string_view scene_path,
         obj_path += obj_name;
         obj_path += ".glb";
 
-        int64_t inst_obj_id = parseObject(obj_path, parse_data);
+        int64_t inst_obj_id =
+            parseObject(obj_path, parse_data, false, habitat_txfm);
 
         math::Vector3 translation = getVec3(instance["translation"]);
         math::Quat rotation = getQuat(instance["rotation"], true);
@@ -676,6 +709,7 @@ static const ParsedScene * parseScene(std::string_view scene_path,
             .objID = inst_obj_id,
             .translation = translation,
             .rotation = rotation,
+            .scale = math::Vector3 { 1.f, 1.f, 1.f },
             .dynamic = false,
         });
     }
@@ -712,14 +746,28 @@ static const ParsedScene * parseScene(std::string_view scene_path,
         math::Vector3 translation = getVec3(instance["translation"]);
         math::Quat rotation = getQuat(instance["rotation"], true);
 
+        double uniform_scale;
+        auto scale_err = instance["uniform_scale"].get(uniform_scale);
+        if (scale_err) {
+            uniform_scale = 1.0;
+        }
+
+        math::Vector3 scale {
+            (float)uniform_scale,
+            (float)uniform_scale,
+            (float)uniform_scale,
+        };
+
         std::string urdf_path = find_urdf(urdf_dir, obj_name);
 
-        int64_t inst_obj_id = parseObject(urdf_path, parse_data, true);
+        int64_t inst_obj_id =
+            parseObject(urdf_path, parse_data, true, urdf_txfm);
 
         additional_instances.push_back({
             .objID = inst_obj_id,
             .translation = translation,
             .rotation = rotation,
+            .scale = scale,
             .dynamic = false,
         });
     }
@@ -786,7 +834,7 @@ TrainingData TrainingData::load(const char *episode_file,
             parseScene(scene_path, parse_data);
 
         math::Vector3 start_pos = getVec3(episode["start_position"]);
-        math::Quat start_rot = getQuat(episode["start_rotation"], true);
+        math::Quat start_rot = getQuat(episode["start_rotation"], false);
 
         auto obj_config_dirs_iter =
             getArrayBegin(episode["additional_obj_config_paths"]);
@@ -824,10 +872,6 @@ TrainingData TrainingData::load(const char *episode_file,
                 scale.x *= -1.f;
             }
 
-            assert(fabsf(scale.x - 1.f) < 0.1);
-            assert(fabsf(scale.y - 1.f) < 0.1);
-            assert(fabsf(scale.z - 1.f) < 0.1);
-
             auto v1 = (txfm.cols[0] / scale.x).normalize();
             auto v2 = txfm.cols[1] / scale.y;
             auto v3 = txfm.cols[2] / scale.z;
@@ -842,32 +886,49 @@ TrainingData TrainingData::load(const char *episode_file,
             std::string obj_path = data_dir;
             obj_path += obj_config_dir;
             obj_path += "/../meshes/";
-            auto obj_prefix = obj_config_path.substr(0, obj_config_path.find('.'));
+            auto obj_prefix =
+                obj_config_path.substr(0, obj_config_path.find('.'));
             obj_path += obj_prefix;
             obj_path += "/google_16k/textured.glb";
 
-            int64_t inst_obj_id = parseObject(obj_path, parse_data, false);
+            int64_t inst_obj_id =
+                parseObject(obj_path, parse_data, false, ycb_txfm);
 
             dyn_insts.push_back(ParsedInstance {
                 .objID = inst_obj_id,
                 .translation = translation,
                 .rotation = rot,
+                .scale = scale,
                 .dynamic = true,
             });
         }
 
+        auto fixTranslation = [](math::Vector3 v) {
+            return math::Vector3 { v.x, -v.z, v.y };
+        };
+
+        auto fixRotation = [](math::Quat q) {
+            return math::Quat { q.w, q.x, -q.z, q.y };
+        };
+
+        auto fixScale = [](math::Vector3 s) {
+            return math::Vector3 { s.x, s.z, s.y };
+        };
+
         int32_t inst_offset = parse_data.trainData.instances.size();
         parse_data.trainData.instances.push_back({
             int32_t(scene->stageObjID),
-            scene->stageTranslation,
-            scene->stageRotation,
+            fixTranslation(scene->stageTranslation),
+            fixRotation(scene->stageRotation),
+            math::Vector3 { 1.f, 1.f, 1.f },
         });
 
         for (const ParsedInstance &inst : scene->additionalInstances) {
             parse_data.trainData.instances.push_back({
                 int32_t(inst.objID),
-                inst.translation,
-                inst.rotation,
+                fixTranslation(inst.translation),
+                fixRotation(inst.rotation),
+                fixScale(inst.scale),
             });
         }
 
@@ -876,8 +937,9 @@ TrainingData TrainingData::load(const char *episode_file,
         for (const ParsedInstance &inst : dyn_insts) {
             parse_data.trainData.instances.push_back({
                 int32_t(inst.objID),
-                inst.translation,
-                inst.rotation,
+                fixTranslation(inst.translation),
+                fixRotation(inst.rotation),
+                fixScale(inst.scale),
             });
 
             // HACK
@@ -894,12 +956,10 @@ TrainingData TrainingData::load(const char *episode_file,
             inst_offset,
             num_instances,
             dyn_offset - inst_offset,
-            start_pos,
-            start_rot,
-            dyn_insts[0].translation,
+            fixTranslation(start_pos),
+            fixRotation(start_rot),
+            fixTranslation(dyn_insts[0].translation),
         });
-
-        assert(num_instances < 100);
     }
 
     std::cout << parse_data.trainData.episodes.size() << std::endl;

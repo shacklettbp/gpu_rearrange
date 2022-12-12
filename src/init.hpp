@@ -11,6 +11,7 @@ struct InstanceInit {
     int32_t objectIndex;
     madrona::base::Position pos;
     madrona::base::Rotation rot;
+    madrona::base::Scale scale;
 };
 
 struct Episode {

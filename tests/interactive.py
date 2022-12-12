@@ -29,6 +29,10 @@ def get_keyboard_action():
             return 3
         elif key_action == 's':
             return  4
+        elif key_action == 'c':
+            return  5
+        elif key_action == 'z':
+            return  6
         elif key_action == 'q':
             return -1
         else:

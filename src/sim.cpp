@@ -46,9 +46,16 @@ static void resetWorld(Engine &ctx)
 
     auto &bp_bvh = ctx.getSingleton<broadphase::BVH>();
 
-    auto reinit_entity = [&](Entity e, Position pos, Rotation rot) {
+    auto reinit_entity = [&](Entity e,
+                             Position pos,
+                             Rotation rot,
+                             Optional<Scale> scale) {
         ctx.getUnsafe<Position>(e) = pos;
         ctx.getUnsafe<Rotation>(e) = rot;
+
+        if (scale.has_value()) {
+            ctx.getUnsafe<Scale>(e) = *scale;
+        }
 
         // FIXME, currently we have to update all this BVH related state
         // in preparation for the rebuild at the end of this function.
@@ -71,7 +78,8 @@ static void resetWorld(Engine &ctx)
 
         Entity dyn_entity = dyn_entities[i];
 
-        reinit_entity(dyn_entity, instance_init.pos, instance_init.rot);
+        reinit_entity(dyn_entity, instance_init.pos, instance_init.rot,
+                      instance_init.scale);
 
         ctx.getUnsafe<render::ObjectID>(dyn_entity).idx =
             instance_init.objectIndex;
@@ -79,7 +87,8 @@ static void resetWorld(Engine &ctx)
 
     Entity agent_entity = ctx.data().agent;
 
-    reinit_entity(agent_entity, episode.agentPos, episode.agentRot);
+    reinit_entity(agent_entity, episode.agentPos, episode.agentRot,
+                  Optional<Scale>::none());
 
     Goal &goal_data = ctx.getUnsafe<Goal>(agent_entity);
     goal_data.objectStartingPosition = episode_mgr.instanceInits[
@@ -110,20 +119,28 @@ inline void actionSystem(Engine &, const Action &action,
         // Implement stop
     } break;
     case 1: {
-        Vector3 fwd = rot.rotateDir({0, 0, -1});
+        Vector3 fwd = rot.rotateDir(math::fwd);
         pos += fwd;
     } break;
     case 2: {
-        const Quat left_rot = Quat::angleAxis(-turn_angle, {0, 1, 0});
-        rot = rot * left_rot;
+        const Quat left_rot = Quat::angleAxis(turn_angle, math::up);
+        rot = (rot * left_rot).normalize();
     } break;
     case 3: {
-        const Quat right_rot = Quat::angleAxis(turn_angle, {0, 1, 0});
-        rot = rot * right_rot;
+        const Quat right_rot = Quat::angleAxis(-turn_angle, math::up);
+        rot = (rot * right_rot).normalize();
     } break;
     case 4: {
-        Vector3 fwd = rot.rotateDir({0, 0, -1});
+        Vector3 fwd = rot.rotateDir(math::fwd);
         pos -= fwd;
+    } break;
+    case 5: {
+        Vector3 up = rot.rotateDir(math::up);
+        pos += up;
+    } break;
+    case 6: {
+        Vector3 up = rot.rotateDir(math::up);
+        pos -= up;
     } break;
     default:
         break;
@@ -202,7 +219,7 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     
     agent = ctx.makeEntityNow<Agent>();
     ctx.getUnsafe<render::ActiveView>(agent) =
-        render::RenderingSystem::setupView(ctx, 90.f, {0, 1, 0});
+        render::RenderingSystem::setupView(ctx, 90.f, math::up * 0.5f);
     ctx.getUnsafe<broadphase::LeafID>(agent) =
         bp_bvh.reserveLeaf();
 
