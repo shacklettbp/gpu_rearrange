@@ -638,8 +638,8 @@ static constexpr math::Mat3x4 urdf_txfm {{
 
 static constexpr math::Mat3x4 ycb_txfm {{
     { 1, 0, 0, },
-    { 0, 0, 1, },
     { 0, 1, 0, },
+    { 0, 0, 1, },
     { 0, 0, 0, },
 }};
 
