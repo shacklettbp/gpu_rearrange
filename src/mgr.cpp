@@ -86,7 +86,7 @@ Manager::Impl * Manager::Impl::init(const Config &cfg)
         .numWorldDataBytes = sizeof(Sim),
         .worldDataAlignment = alignof(Sim),
         .numWorlds = cfg.numWorlds,
-        .numExportedBuffers = 2,
+        .numExportedBuffers = 3,
         .gpuID = (uint32_t)cfg.gpuID,
         .renderWidth = cfg.renderWidth,
         .renderHeight = cfg.renderHeight,
