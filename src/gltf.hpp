@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include <madrona/scene.hpp>
+#include <madrona/importer.hpp>
 
 namespace GPURearrange {
 
@@ -126,9 +126,11 @@ struct GLTFScene {
 };
 
 struct MergedSourceObject {
-    std::vector<std::vector<madrona::render::SourceVertex>> vertices;
+    std::vector<std::vector<madrona::math::Vector3>> positions;
+    std::vector<std::vector<madrona::math::Vector3>> normals;
+    std::vector<std::vector<madrona::math::Vector2>> uvs;
     std::vector<std::vector<uint32_t>> indices;
-    std::vector<madrona::render::SourceMesh> meshes;
+    std::vector<madrona::imp::SourceMesh> meshes;
 };
 
 MergedSourceObject loadAndParseGLTF(std::filesystem::path gltf_path, 

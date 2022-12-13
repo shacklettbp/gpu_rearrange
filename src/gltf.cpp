@@ -1215,7 +1215,7 @@ SceneDescription<VertexType, MaterialType> parseGLTF(
 #endif
 
 struct ParsedMesh {
-    vector<render::SourceVertex> vertices;
+    vector<imp::SourceVertex> vertices;
     vector<uint32_t> indices;
 };
 
@@ -1227,7 +1227,7 @@ static vector<ParsedMesh> gltfParseMesh(
     vector<ParsedMesh> meshes;
 
     for (const GLTFPrimitive &prim : gltf_mesh.primitives) {
-        vector<render::SourceVertex> vertices;
+        vector<imp::SourceVertex> vertices;
         vector<uint32_t> indices;
 
         optional<StridedSpan<const math::Vector3>> position_accessor;
@@ -1296,7 +1296,7 @@ static vector<ParsedMesh> gltfParseMesh(
 
         vertices.reserve(max_idx + 1);
         for (uint32_t vert_idx = 0; vert_idx <= max_idx; vert_idx++) {
-            render::SourceVertex vert {};
+            imp::SourceVertex vert {};
 
             vert.position = (*position_accessor)[vert_idx];
             if (isnan(vert.position.x) || isinf(vert.position.x)) {
@@ -1435,8 +1435,12 @@ MergedSourceObject loadAndParseGLTF(std::filesystem::path gltf_path,
     for (const auto &inst : instances) {
         const auto &src_obj_meshes = geometry[inst.objectIndex];
         for (const ParsedMesh &src_mesh : src_obj_meshes) {
-            std::vector<render::SourceVertex> new_vertices;
-            new_vertices.reserve(src_mesh.vertices.size());
+            std::vector<math::Vector3> new_positions;
+            std::vector<math::Vector3> new_normals;
+            std::vector<math::Vector2> new_uvs;
+            new_positions.reserve(src_mesh.vertices.size());
+            new_normals.reserve(src_mesh.vertices.size());
+            new_uvs.reserve(src_mesh.vertices.size());
 
             // copy
             std::vector<uint32_t> new_indices(src_mesh.indices);
@@ -1448,20 +1452,26 @@ MergedSourceObject loadAndParseGLTF(std::filesystem::path gltf_path,
                 glm::vec3 normal { v.normal.x, v.normal.y, v.normal.z };
                 glm::vec3 txfm_normal =
                     glm::normalize(inst.normalTxfm * normal);
-                new_vertices.push_back(render::SourceVertex {
-                    .position = { txfm_pos.x, txfm_pos.y, txfm_pos.z },
-                    .normal = { txfm_normal.x, txfm_normal.y, txfm_normal.z },
-                    .tangentAndSign {},
-                    .uv = { v.uv },
-                });
+                new_positions.push_back({txfm_pos.x, txfm_pos.y, txfm_pos.z });
+                new_normals.push_back({txfm_normal.x, txfm_normal.y,
+                    txfm_normal.z });
+                new_uvs.push_back({ v.uv.x, v.uv.y });
             }
 
-            merged.vertices.emplace_back(std::move(new_vertices));
+            merged.positions.emplace_back(std::move(new_positions));
+            merged.normals.emplace_back(std::move(new_normals));
+            merged.uvs.emplace_back(std::move(new_uvs));
             merged.indices.emplace_back(std::move(new_indices));
 
-            render::SourceMesh txfm_mesh {
-                Span<const render::SourceVertex>(merged.vertices.back()),
-                Span<const uint32_t>(merged.indices.back()),
+            imp::SourceMesh txfm_mesh {
+                merged.positions.back().data(),
+                merged.normals.back().data(),
+                nullptr,
+                merged.uvs.back().data(),
+                merged.indices.back().data(),
+                nullptr,
+                uint32_t(src_mesh.vertices.size()),
+                uint32_t(src_mesh.indices.size() / 3),
             };
 
             merged.meshes.push_back(txfm_mesh);

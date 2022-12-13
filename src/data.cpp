@@ -548,8 +548,16 @@ static MergedSourceObject parseURDF(std::string_view obj_path,
             
             MergedSourceObject sub = loadAndParseGLTF(path, cur_txfm);
 
-            for (auto &vert_list : sub.vertices) {
-                all_merged.vertices.emplace_back(std::move(vert_list));
+            for (auto &pos_list : sub.positions) {
+                all_merged.positions.emplace_back(std::move(pos_list));
+            }
+
+            for (auto &normal_list : sub.normals) {
+                all_merged.normals.emplace_back(std::move(normal_list));
+            }
+
+            for (auto &uv_list : sub.uvs) {
+                all_merged.uvs.emplace_back(std::move(uv_list));
             }
 
             for (auto &idx_list : sub.indices) {
@@ -600,8 +608,16 @@ static int64_t parseObject(std::string_view obj_path, ParseData &parse_data,
         parseURDF(obj_path, urdfBaseTXFM(base_txfm)) :
         loadAndParseGLTF(obj_path, base_txfm);
 
-    for (auto &vert_list : obj.vertices) {
-        parse_data.trainData.vertices.emplace_back(std::move(vert_list));
+    for (auto &pos_list : obj.positions) {
+        parse_data.trainData.positions.emplace_back(std::move(pos_list));
+    }
+
+    for (auto &normal_list : obj.normals) {
+        parse_data.trainData.normals.emplace_back(std::move(normal_list));
+    }
+
+    for (auto &uv_list : obj.uvs) {
+        parse_data.trainData.uvs.emplace_back(std::move(uv_list));
     }
 
     for (auto &idx_list : obj.indices) {
@@ -613,7 +629,7 @@ static int64_t parseObject(std::string_view obj_path, ParseData &parse_data,
     int64_t obj_id = parse_data.trainData.objects.size();
 
     parse_data.trainData.objects.push_back({
-        Span<const render::SourceMesh>(parse_data.trainData.meshes.back()),
+        Span<const imp::SourceMesh>(parse_data.trainData.meshes.back()),
     });
 
     auto [iter, success] = parse_data.parsedObjs.emplace(obj_path, obj_id);

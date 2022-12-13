@@ -1,6 +1,6 @@
 #pragma once
 
-#include <madrona/scene.hpp>
+#include <madrona/importer.hpp>
 
 #include <vector>
 
@@ -11,10 +11,12 @@ namespace GPURearrange {
 struct TrainingData {
     std::vector<Episode> episodes;
     std::vector<InstanceInit> instances;
-    std::vector<std::vector<madrona::render::SourceVertex>> vertices;
+    std::vector<std::vector<madrona::math::Vector3>> positions;
+    std::vector<std::vector<madrona::math::Vector3>> normals;
+    std::vector<std::vector<madrona::math::Vector2>> uvs;
     std::vector<std::vector<uint32_t>> indices;
-    std::vector<std::vector<madrona::render::SourceMesh>> meshes;
-    std::vector<madrona::render::SourceObject> objects;
+    std::vector<std::vector<madrona::imp::SourceMesh>> meshes;
+    std::vector<madrona::imp::SourceObject> objects;
 
     static TrainingData load(const char *episode_file, const char *data_dir);
 };
