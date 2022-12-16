@@ -36,6 +36,8 @@ void Sim::registerTypes(ECSRegistry &registry)
 
 static void resetWorld(Engine &ctx)
 {
+    RigidBodyPhysicsSystem::reset(ctx);
+
     EpisodeManager &episode_mgr = *ctx.data().episodeMgr;
     uint32_t episode_idx = 
         episode_mgr.episodeOffset.fetch_add(1, std::memory_order_relaxed);
@@ -159,8 +161,10 @@ void Sim::setupTasks(TaskGraph::Builder &builder)
 
     auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {action_sys}, 1);
 
+    auto sim_done = phys_sys;
+
     auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
-        {phys_sys});
+        {sim_done});
 
     auto learning_sys = builder.parallelForNode<Engine, learningOutputsSystem,
         GPSCompassObs, Reward, Position, Rotation, Goal>({sim_done});
@@ -188,8 +192,6 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     agent = ctx.makeEntityNow<Agent>();
     ctx.getUnsafe<render::ActiveView>(agent) =
         render::RenderingSystem::setupView(ctx, 90.f, math::up * 0.5f);
-    ctx.getUnsafe<broadphase::LeafID>(agent) =
-        bp_bvh.reserveLeaf();
 
     dynObjects = (Entity *)rawAlloc(sizeof(Entity) * size_t(max_instances));
 

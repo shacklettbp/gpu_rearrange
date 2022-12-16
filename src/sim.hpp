@@ -63,8 +63,6 @@ static_assert(sizeof(Reward) == sizeof(float));
 struct Agent : public madrona::Archetype<
     Position,
     Rotation,
-    madrona::phys::CollisionAABB,
-    madrona::phys::broadphase::LeafID,
     madrona::render::ActiveView,
     Action,
     ObjectHeld,
