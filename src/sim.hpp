@@ -14,6 +14,7 @@ namespace GPURearrange {
 using madrona::base::Position;
 using madrona::base::Rotation;
 using madrona::base::Scale;
+using madrona::base::ObjectID;
 
 class Engine;
 
@@ -25,9 +26,9 @@ struct DynamicObject : public madrona::Archetype<
     Position, 
     Rotation,
     Scale,
+    ObjectID,
     madrona::phys::CollisionAABB,
-    madrona::phys::broadphase::LeafID,
-    madrona::render::ObjectID
+    madrona::phys::broadphase::LeafID
 > {};
 
 struct Action {

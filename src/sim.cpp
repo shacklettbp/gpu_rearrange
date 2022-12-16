@@ -14,7 +14,7 @@ static constexpr inline CountT max_instances = 45;
 void Sim::registerTypes(ECSRegistry &registry)
 {
     base::registerTypes(registry);
-    RigidBodyPhysicsSystem::registerTypes(registry);
+    phys::RigidBodyPhysicsSystem::registerTypes(registry);
     render::RenderingSystem::registerTypes(registry);
 
     registry.registerComponent<Action>();
@@ -44,33 +44,6 @@ static void resetWorld(Engine &ctx)
 
     assert(episode.numInstances == max_instances);
 
-    auto &bp_bvh = ctx.getSingleton<broadphase::BVH>();
-
-    auto reinit_entity = [&](Entity e,
-                             Position pos,
-                             Rotation rot,
-                             Optional<Scale> scale) {
-        ctx.getUnsafe<Position>(e) = pos;
-        ctx.getUnsafe<Rotation>(e) = rot;
-
-        if (scale.has_value()) {
-            ctx.getUnsafe<Scale>(e) = *scale;
-        }
-
-        // FIXME, currently we have to update all this BVH related state
-        // in preparation for the rebuild at the end of this function.
-        // That's a bit silly because these values are updated
-        // in parallel later by the task graph. Ideally the BVH refit
-        // node should instead switch to some kind of conditional rebuild refit
-        // and not of this manual setup would be needed
-        CollisionAABB &aabb = ctx.getUnsafe<CollisionAABB>(e);
-        aabb = CollisionAABB(pos, rot);
-
-        broadphase::LeafID &leaf_id = ctx.getUnsafe<broadphase::LeafID>(e);
-        bp_bvh.updateLeaf(e, leaf_id, aabb);
-
-    };
-
     Entity *dyn_entities = ctx.data().dynObjects;
     for (CountT i = 0; i < CountT(episode.numInstances); i++) {
         InstanceInit instance_init =
@@ -78,25 +51,23 @@ static void resetWorld(Engine &ctx)
 
         Entity dyn_entity = dyn_entities[i];
 
-        reinit_entity(dyn_entity, instance_init.pos, instance_init.rot,
-                      instance_init.scale);
-
-        ctx.getUnsafe<render::ObjectID>(dyn_entity).idx =
+        ctx.getUnsafe<Position>(dyn_entity) = instance_init.pos;
+        ctx.getUnsafe<Rotation>(dyn_entity) = instance_init.rot;
+        ctx.getUnsafe<Scale>(dyn_entity) = instance_init.scale;
+        ctx.getUnsafe<ObjectID>(dyn_entity).idx =
             instance_init.objectIndex;
     }
 
     Entity agent_entity = ctx.data().agent;
 
-    reinit_entity(agent_entity, episode.agentPos, episode.agentRot,
-                  Optional<Scale>::none());
+    ctx.getUnsafe<Position>(agent_entity) = episode.agentPos;
+    ctx.getUnsafe<Rotation>(agent_entity) = episode.agentRot;
 
     Goal &goal_data = ctx.getUnsafe<Goal>(agent_entity);
     goal_data.objectStartingPosition = episode_mgr.instanceInits[
         episode.instanceOffset + episode.targetIdx].pos;
     goal_data.goalPosition = episode.goalPos;
     goal_data.goalEntity = dyn_entities[episode.targetIdx];
-
-    bp_bvh.rebuild();
 }
 
 inline void resetSystem(Engine &ctx, WorldReset &reset)
@@ -116,7 +87,7 @@ inline void actionSystem(Engine &, const Action &action,
 
     switch(action.action) {
     case 0: {
-        // Implement stop
+        // Wait
     } break;
     case 1: {
         Vector3 fwd = rot.rotateDir(math::fwd);
@@ -186,12 +157,10 @@ void Sim::setupTasks(TaskGraph::Builder &builder)
     auto action_sys = builder.parallelForNode<Engine, actionSystem,
         Action, Position, Rotation>({reset_sys});
 
-    auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {action_sys});
-
-    auto sim_done = phys_sys;
+    auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {action_sys}, 1);
 
     auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
-        {sim_done});
+        {phys_sys});
 
     auto learning_sys = builder.parallelForNode<Engine, learningOutputsSystem,
         GPSCompassObs, Reward, Position, Rotation, Goal>({sim_done});
@@ -206,12 +175,11 @@ void Sim::setupTasks(TaskGraph::Builder &builder)
     printf("Setup done\n");
 }
 
-
 Sim::Sim(Engine &ctx, const WorldInit &init)
     : WorldBase(ctx),
       episodeMgr(init.episodeMgr)
 {
-    RigidBodyPhysicsSystem::init(ctx, max_instances + 1, 100 * 50);
+    RigidBodyPhysicsSystem::init(ctx, 1.f / 30.f, 1, max_instances + 1, 100 * 50);
 
     render::RenderingSystem::init(ctx);
 
