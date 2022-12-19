@@ -36,7 +36,7 @@ void Sim::registerTypes(ECSRegistry &registry)
 
 static void resetWorld(Engine &ctx)
 {
-    RigidBodyPhysicsSystem::reset(ctx);
+    //RigidBodyPhysicsSystem::reset(ctx);
 
     EpisodeManager &episode_mgr = *ctx.data().episodeMgr;
     uint32_t episode_idx = 
@@ -159,12 +159,12 @@ void Sim::setupTasks(TaskGraph::Builder &builder)
     auto action_sys = builder.parallelForNode<Engine, actionSystem,
         Action, Position, Rotation>({reset_sys});
 
-    auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {action_sys}, 1);
+    //auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {action_sys}, 1);
 
-    auto sim_done = phys_sys;
+    auto sim_done = action_sys;
 
-    auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
-        {sim_done});
+    //auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
+    //    {sim_done});
 
     auto learning_sys = builder.parallelForNode<Engine, learningOutputsSystem,
         GPSCompassObs, Reward, Position, Rotation, Goal>({sim_done});
@@ -172,7 +172,7 @@ void Sim::setupTasks(TaskGraph::Builder &builder)
     auto renderer_sys = render::RenderingSystem::setupTasks(builder,
         {sim_done});
 
-    (void)phys_cleanup_sys;
+    //(void)phys_cleanup_sys;
     (void)learning_sys;
     (void)renderer_sys;
 
@@ -183,11 +183,11 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
     : WorldBase(ctx),
       episodeMgr(init.episodeMgr)
 {
-    RigidBodyPhysicsSystem::init(ctx, 1.f / 30.f, 1, max_instances + 1, 100 * 50);
+    //RigidBodyPhysicsSystem::init(ctx, 1.f / 30.f, 1, max_instances + 1, 100 * 50);
 
     render::RenderingSystem::init(ctx);
 
-    broadphase::BVH &bp_bvh = ctx.getSingleton<broadphase::BVH>();
+    //broadphase::BVH &bp_bvh = ctx.getSingleton<broadphase::BVH>();
     
     agent = ctx.makeEntityNow<Agent>();
     ctx.getUnsafe<render::ActiveView>(agent) =
@@ -197,8 +197,8 @@ Sim::Sim(Engine &ctx, const WorldInit &init)
 
     for (CountT i = 0; i < max_instances; i++) {
         dynObjects[i] = ctx.makeEntityNow<DynamicObject>();
-        ctx.getUnsafe<broadphase::LeafID>(dynObjects[i]) =
-            bp_bvh.reserveLeaf();
+        //ctx.getUnsafe<broadphase::LeafID>(dynObjects[i]) =
+        //    bp_bvh.reserveLeaf();
     }
 
     resetWorld(ctx);
