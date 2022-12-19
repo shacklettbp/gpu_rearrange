@@ -3,6 +3,7 @@ add_subdirectory(madrona EXCLUDE_FROM_ALL)
 set(BUILD_SHARED_LIBS ON)
 add_subdirectory(simdjson EXCLUDE_FROM_ALL)
 unset(BUILD_SHARED_LIBS)
+set_target_properties(simdjson PROPERTIES CXX_VISIBILITY_PRESET default)
 
 set(LIBXML2_WITH_C14N OFF CACHE INTERNAL "" FORCE)
 set(LIBXML2_WITH_DEBUG OFF CACHE INTERNAL "" FORCE)
